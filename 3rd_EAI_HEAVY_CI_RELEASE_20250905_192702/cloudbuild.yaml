@@ -1,0 +1,38 @@
+
+steps:
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - -lc
+      - |
+        apt-get update && apt-get install -y --no-install-recommends           ca-certificates curl wget unzip tar git build-essential pkg-config           libssl-dev ruby-full nmap sqlmap ffuf gobuster trivy           tshark exiftool default-jre seclists zsteg wafw00f python3-venv
+        curl -fsSL https://go.dev/dl/go1.22.5.linux-amd64.tar.gz | tar -C /usr/local -xz
+        export GOPATH=/workspace/go
+        export PATH=$GOPATH/bin:/usr/local/go/bin:$PATH
+        go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+        go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+        go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+        go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+        go install github.com/projectdiscovery/katana/cmd/katana@latest
+        go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+        go install github.com/tomnomnom/waybackurls@latest
+        go install github.com/jaeles-project/uro/cmd/uro@latest
+        go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
+        gem install wpscan
+        python3 -m pip install --no-cache-dir volatility3
+        nuclei -update-templates || true
+        mkdir -p vendor/bin vendor/seclists vendor/nuclei-templates
+        cp -a /workspace/go/bin/* vendor/bin/ || true
+        for b in /usr/bin/sqlmap /usr/bin/ffuf /usr/bin/gobuster /usr/bin/trivy /usr/bin/tshark /usr/bin/zsteg /usr/bin/wafw00f; do
+          if [ -x "$b" ]; then cp "$b" vendor/bin/; fi
+        done
+        echo '#!/usr/bin/env bash' > vendor/bin/wpscan && echo 'exec gem wpscan "$@"' >> vendor/bin/wpscan && chmod +x vendor/bin/wpscan
+        ln -sf $(command -v volatility3) vendor/bin/volatility3 || true
+        cp -a /usr/share/seclists vendor/seclists || true
+        cp -a /root/.local/share/nuclei-templates vendor/nuclei-templates || true
+        NAME="3rd_EAI_HEAVY_FULL_$(date +%Y%m%d_%H%M%S).zip"
+        zip -r "$NAME" . -x ".git/*" -x "vendor/*.zip"
+artifacts:
+  objects:
+    location: gs://YOUR_BUCKET/3rd-eai/
+    paths: ["3rd_EAI_HEAVY_FULL_*.zip"]

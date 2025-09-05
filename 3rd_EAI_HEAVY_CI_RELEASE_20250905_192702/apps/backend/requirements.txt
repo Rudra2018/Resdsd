@@ -1,0 +1,1 @@
+fastapi uvicorn[standard] pydantic httpx python-dotenv openai google-generativeai langchain langchain-community crewai crewai-tools jinja2 reportlab markdown requests grpcio protobuf PyYAML google-cloud-pubsub google-cloud-bigquery cloudevents

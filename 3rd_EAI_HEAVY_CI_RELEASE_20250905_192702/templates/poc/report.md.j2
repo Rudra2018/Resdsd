@@ -1,0 +1,22 @@
+
+# {{ title }}
+**Program:** {{ program }}  
+**Date:** {{ date }}  
+**Scope:** {{ scope }}
+
+## Summary
+{{ summary }}
+
+{% for f in findings %}
+### {{ f.title }}
+Severity: **{{ f.severity|upper }}**  |  Confidence: **{{ '%.2f'|format(f.confidence or 0.0) }}**  |  Target: {{ f.target }}
+**Evidence:**
+```
+{{ f.evidence }}
+```
+**PoC:**
+```
+{{ f.poc }}
+```
+**Fix:** {{ f.remediation or 'Review input validation and access control.' }}
+{% endfor %}
