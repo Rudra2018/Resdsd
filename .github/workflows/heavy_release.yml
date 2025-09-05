@@ -1,0 +1,85 @@
+
+name: HEAVY Release Builder
+on:
+  workflow_dispatch: {}
+  push:
+    tags: ['v*']
+jobs:
+  build-and-release:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+
+      - name: Install APT packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             ca-certificates curl wget unzip tar git build-essential pkg-config             libssl-dev ruby-full nmap sqlmap ffuf gobuster trivy             tshark exiftool default-jre seclists zsteg wafw00f python3-venv
+
+      - name: Install Go-based tools
+        run: |
+          export GOPATH=$HOME/go
+          export PATH=$GOPATH/bin:/usr/local/go/bin:$PATH
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+          go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+          go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
+          go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+          go install github.com/projectdiscovery/katana/cmd/katana@latest
+          go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          go install github.com/tomnomnom/waybackurls@latest
+          go install github.com/jaeles-project/uro/cmd/uro@latest
+          go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
+
+      - name: Install WPScan gem & Volatility3
+        run: |
+          sudo gem install wpscan
+          python3 -m pip install --user --upgrade pip
+          python3 -m pip install --user volatility3
+
+      - name: Update nuclei templates
+        run: |
+          export PATH=$HOME/go/bin:$PATH
+          nuclei -update-templates || true
+          echo "templates at $HOME/.local/share/nuclei-templates"
+
+      - name: Vendor heavy assets
+        run: |
+          mkdir -p vendor/bin vendor/seclists vendor/nuclei-templates
+          # Binaries
+          cp -a $HOME/go/bin/* vendor/bin/ || true
+          for b in /usr/bin/sqlmap /usr/bin/ffuf /usr/bin/gobuster /usr/bin/trivy /usr/bin/tshark /usr/bin/zsteg /usr/bin/wafw00f; do
+            if [ -x "$b" ]; then cp "$b" vendor/bin/; fi
+          done
+          # WPScan shim
+          echo '#!/usr/bin/env bash' > vendor/bin/wpscan && echo 'exec gem wpscan "$@"' >> vendor/bin/wpscan && chmod +x vendor/bin/wpscan
+          # Volatility3
+          if command -v volatility3 >/dev/null 2>&1; then
+            ln -sf $(command -v volatility3) vendor/bin/volatility3
+          fi
+          # SecLists
+          if [ -d /usr/share/seclists ]; then cp -a /usr/share/seclists vendor/seclists; fi
+          # nuclei templates
+          if [ -d $HOME/.local/share/nuclei-templates ]; then cp -a $HOME/.local/share/nuclei-templates vendor/nuclei-templates; fi
+
+      - name: Compose heavy ZIP
+        run: |
+          NAME="3rd_EAI_HEAVY_FULL_$(date +%Y%m%d_%H%M%S).zip"
+          zip -r "$NAME" . -x ".git/*" -x "vendor/*.zip"
+          echo "ZIP_NAME=$NAME" >> $GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: ${{ env.ZIP_NAME }}
+
+      - name: Release (if tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ZIP_NAME }}
