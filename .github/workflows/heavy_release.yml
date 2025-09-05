@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       DEBIAN_FRONTEND: noninteractive
+      GOPATH: ${{ github.workspace }}/go
+      PATH: ${{ github.workspace }}/go/bin:/usr/local/go/bin:/usr/bin:/bin:/usr/sbin:/sbin
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,6 +19,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22.x'
+          cache: true
 
       - name: Base APT packages
         run: |
@@ -26,18 +29,26 @@ jobs:
             libssl-dev ruby-full nmap sqlmap ffuf gobuster \
             tshark exiftool default-jre python3-venv
 
-      # --- Trivy via official script (fixes 404 from apt repo) ---
+      # ---- Trivy (choose ONE of the two blocks) ----
+      # A) Official installer (latest)
       - name: Install Trivy
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
           | sudo sh -s -- -b /usr/local/bin
           trivy --version
+      # B) Pinned version (uncomment and comment A if you prefer)
+      # - name: Install Trivy (pinned)
+      #   run: |
+      #     set -e
+      #     VER="0.66.0"
+      #     ARCH="Linux-64bit.tar.gz"
+      #     URL="https://github.com/aquasecurity/trivy/releases/download/v${VER}/trivy_${VER}_${ARCH}"
+      #     curl -fL "$URL" -o trivy.tgz
+      #     sudo tar -zxvf trivy.tgz -C /usr/local/bin trivy
+      #     trivy --version
 
-      # --- Go-based tools ---
       - name: Install Go-based tools
         run: |
-          export GOPATH=$HOME/go
-          export PATH=$GOPATH/bin:/usr/local/go/bin:$PATH
           go install github.com/projectdiscovery/httpx/cmd/httpx@latest
           go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
           go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest
@@ -48,7 +59,6 @@ jobs:
           go install github.com/jaeles-project/uro/cmd/uro@latest
           go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
 
-      # --- Gems / PyPI tools ---
       - name: Install WPScan, zsteg, volatility3, wafw00f
         run: |
           sudo gem install wpscan
@@ -56,50 +66,40 @@ jobs:
           python3 -m pip install --user --upgrade pip
           python3 -m pip install --user volatility3 wafw00f
 
-      # --- nuclei templates ---
       - name: Update nuclei templates
         run: |
-          export PATH=$HOME/go/bin:$PATH
           nuclei -update-templates || true
           echo "templates at $HOME/.local/share/nuclei-templates"
 
-      # --- Vendor heavy assets into ./vendor ---
       - name: Vendor heavy assets
         run: |
           set -e
-          export GOPATH=$HOME/go
-          export PATH=$GOPATH/bin:/usr/local/go/bin:$PATH
           mkdir -p vendor/bin vendor/seclists vendor/nuclei-templates
 
           # Go binaries
-          cp -a $HOME/go/bin/* vendor/bin/ || true
+          cp -a "$GOPATH/bin/"* vendor/bin/ || true
 
           # System/installed binaries
           for b in /usr/bin/sqlmap /usr/bin/ffuf /usr/bin/gobuster /usr/bin/tshark /usr/bin/nmap; do
             if [ -x "$b" ]; then cp "$b" vendor/bin/; fi
           done
-          # Trivy (script installed)
-          if command -v trivy >/dev/null 2>&1; then
-            sudo cp "$(command -v trivy)" vendor/bin/trivy
-          fi
-
+          # Trivy
+          if command -v trivy >/dev/null 2>&1; then sudo cp "$(command -v trivy)" vendor/bin/trivy; fi
           # WPScan & zsteg (gems)
           if command -v wpscan >/dev/null 2>&1; then ln -sf "$(command -v wpscan)" vendor/bin/wpscan; fi
           if command -v zsteg  >/dev/null 2>&1; then ln -sf "$(command -v zsteg)"  vendor/bin/zsteg;  fi
-
           # wafw00f / volatility3 (pip user)
           if command -v wafw00f >/dev/null 2>&1; then ln -sf "$(command -v wafw00f)" vendor/bin/wafw00f; elif [ -x "$HOME/.local/bin/wafw00f" ]; then ln -sf "$HOME/.local/bin/wafw00f" vendor/bin/wafw00f; fi
           if command -v volatility3 >/dev/null 2>&1; then ln -sf "$(command -v volatility3)" vendor/bin/volatility3; elif [ -x "$HOME/.local/bin/volatility3" ]; then ln -sf "$HOME/.local/bin/volatility3" vendor/bin/volatility3; fi
 
-          # SecLists via git (canonical source)
+          # SecLists (git clone)
           git clone --depth=1 https://github.com/danielmiessler/SecLists.git vendor/seclists
 
           # nuclei templates
-          if [ -d $HOME/.local/share/nuclei-templates ]; then
-            cp -a $HOME/.local/share/nuclei-templates vendor/nuclei-templates
+          if [ -d "$HOME/.local/share/nuclei-templates" ]; then
+            cp -a "$HOME/.local/share/nuclei-templates" vendor/nuclei-templates
           fi
 
-      # --- Compose heavy ZIP ---
       - name: Compose heavy ZIP
         run: |
           NAME="3rd_EAI_HEAVY_FULL_$(date +%Y%m%d_%H%M%S).zip"
