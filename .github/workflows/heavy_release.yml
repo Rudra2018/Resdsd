@@ -1,12 +1,14 @@
-
 name: HEAVY Release Builder
 on:
   workflow_dispatch: {}
   push:
     tags: ['v*']
+
 jobs:
   build-and-release:
     runs-on: ubuntu-22.04
+    env:
+      DEBIAN_FRONTEND: noninteractive
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,11 +18,26 @@ jobs:
         with:
           go-version: '1.22.x'
 
-      - name: Install APT packages
+      - name: Base APT packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends             ca-certificates curl wget unzip tar git build-essential pkg-config             libssl-dev ruby-full nmap sqlmap ffuf gobuster trivy             tshark exiftool default-jre seclists zsteg wafw00f python3-venv
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates curl wget unzip tar git build-essential pkg-config \
+            libssl-dev ruby-full nmap sqlmap ffuf gobuster \
+            tshark exiftool default-jre python3-venv
 
+      # --- TRIVY (Aqua repo) ---
+      - name: Install Trivy (Aqua Security)
+        run: |
+          sudo apt-get install -y --no-install-recommends gnupg software-properties-common
+          curl -fsSL https://aquasecurity.github.io/trivy-repo/deb/public.key | \
+            sudo gpg --dearmor -o /usr/share/keyrings/trivy.gpg
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb stable main" | \
+            sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
+      # --- Go-based tools ---
       - name: Install Go-based tools
         run: |
           export GOPATH=$HOME/go
@@ -35,37 +52,73 @@ jobs:
           go install github.com/jaeles-project/uro/cmd/uro@latest
           go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
 
-      - name: Install WPScan gem & Volatility3
+      # --- Gems / PyPI tools ---
+      - name: Install WPScan, zsteg, volatility3, wafw00f
         run: |
+          # Ruby gems
           sudo gem install wpscan
+          sudo gem install zsteg
+          # Python tools (user install places into ~/.local/bin)
           python3 -m pip install --user --upgrade pip
-          python3 -m pip install --user volatility3
+          python3 -m pip install --user volatility3 wafw00f
 
+      # --- nuclei templates ---
       - name: Update nuclei templates
         run: |
           export PATH=$HOME/go/bin:$PATH
           nuclei -update-templates || true
           echo "templates at $HOME/.local/share/nuclei-templates"
 
+      # --- Vendor heavy assets into ./vendor ---
       - name: Vendor heavy assets
         run: |
+          set -e
+          export GOPATH=$HOME/go
+          export PATH=$GOPATH/bin:/usr/local/go/bin:$PATH
           mkdir -p vendor/bin vendor/seclists vendor/nuclei-templates
-          # Binaries
+
+          # Go binaries
           cp -a $HOME/go/bin/* vendor/bin/ || true
-          for b in /usr/bin/sqlmap /usr/bin/ffuf /usr/bin/gobuster /usr/bin/trivy /usr/bin/tshark /usr/bin/zsteg /usr/bin/wafw00f; do
+
+          # System binaries
+          for b in /usr/bin/sqlmap /usr/bin/ffuf /usr/bin/gobuster /usr/bin/trivy /usr/bin/tshark /usr/bin/nmap; do
             if [ -x "$b" ]; then cp "$b" vendor/bin/; fi
           done
-          # WPScan shim
-          echo '#!/usr/bin/env bash' > vendor/bin/wpscan && echo 'exec gem wpscan "$@"' >> vendor/bin/wpscan && chmod +x vendor/bin/wpscan
-          # Volatility3
-          if command -v volatility3 >/dev/null 2>&1; then
-            ln -sf $(command -v volatility3) vendor/bin/volatility3
-          fi
-          # SecLists
-          if [ -d /usr/share/seclists ]; then cp -a /usr/share/seclists vendor/seclists; fi
-          # nuclei templates
-          if [ -d $HOME/.local/share/nuclei-templates ]; then cp -a $HOME/.local/share/nuclei-templates vendor/nuclei-templates; fi
 
+          # WPScan shim (gem executable)
+          if command -v wpscan >/dev/null 2>&1; then
+            mkdir -p vendor/bin
+            ln -sf "$(command -v wpscan)" vendor/bin/wpscan
+          fi
+
+          # zsteg (gem executable)
+          if command -v zsteg >/dev/null 2>&1; then
+            ln -sf "$(command -v zsteg)" vendor/bin/zsteg
+          fi
+
+          # wafw00f (pip user)
+          if command -v wafw00f >/dev/null 2>&1; then
+            ln -sf "$(command -v wafw00f)" vendor/bin/wafw00f
+          else
+            if [ -x "$HOME/.local/bin/wafw00f" ]; then ln -sf "$HOME/.local/bin/wafw00f" vendor/bin/wafw00f; fi
+          fi
+
+          # volatility3 (pip user)
+          if command -v volatility3 >/dev/null 2>&1; then
+            ln -sf "$(command -v volatility3)" vendor/bin/volatility3
+          else
+            if [ -x "$HOME/.local/bin/volatility3" ]; then ln -sf "$HOME/.local/bin/volatility3" vendor/bin/volatility3; fi
+          fi
+
+          # SecLists (vendor via git clone since no apt pkg)
+          git clone --depth=1 https://github.com/danielmiessler/SecLists.git vendor/seclists
+
+          # nuclei templates
+          if [ -d $HOME/.local/share/nuclei-templates ]; then
+            cp -a $HOME/.local/share/nuclei-templates vendor/nuclei-templates
+          fi
+
+      # --- Compose heavy ZIP ---
       - name: Compose heavy ZIP
         run: |
           NAME="3rd_EAI_HEAVY_FULL_$(date +%Y%m%d_%H%M%S).zip"
