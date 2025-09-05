@@ -29,23 +29,6 @@ jobs:
             libssl-dev ruby-full nmap sqlmap ffuf gobuster \
             tshark exiftool default-jre python3-venv
 
-      # ---- Trivy (choose ONE of the two blocks) ----
-      # A) Official installer (latest)
-      # - name: Install Trivy
-      #  run: |
-      #    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-      #   | sudo sh -s -- -b /usr/local/bin
-      #    trivy --version
-      # B) Pinned version (uncomment and comment A if you prefer)
-      #  - name: Install Trivy (pinned)
-       #   run: |
-        #  #   set -e
-        #   VER="0.66.0"
-        #   ARCH="Linux-64bit.tar.gz"
-        #   URL="https://github.com/aquasecurity/trivy/releases/download/v${VER}/trivy_${VER}_${ARCH}"
-        #   curl -fL "$URL" -o trivy.tgz
-        #   sudo tar -zxvf trivy.tgz -C /usr/local/bin trivy
-         #  trivy --version
 
       - name: Install Go-based tools
         run: |
