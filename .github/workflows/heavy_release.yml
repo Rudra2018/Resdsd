@@ -26,16 +26,12 @@ jobs:
             libssl-dev ruby-full nmap sqlmap ffuf gobuster \
             tshark exiftool default-jre python3-venv
 
-      # --- TRIVY (Aqua repo) ---
-      - name: Install Trivy (Aqua Security)
+      # --- Trivy via official script (fixes 404 from apt repo) ---
+      - name: Install Trivy
         run: |
-          sudo apt-get install -y --no-install-recommends gnupg software-properties-common
-          curl -fsSL https://aquasecurity.github.io/trivy-repo/deb/public.key | \
-            sudo gpg --dearmor -o /usr/share/keyrings/trivy.gpg
-          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb stable main" | \
-            sudo tee /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install -y trivy
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+          | sudo sh -s -- -b /usr/local/bin
+          trivy --version
 
       # --- Go-based tools ---
       - name: Install Go-based tools
@@ -55,10 +51,8 @@ jobs:
       # --- Gems / PyPI tools ---
       - name: Install WPScan, zsteg, volatility3, wafw00f
         run: |
-          # Ruby gems
           sudo gem install wpscan
           sudo gem install zsteg
-          # Python tools (user install places into ~/.local/bin)
           python3 -m pip install --user --upgrade pip
           python3 -m pip install --user volatility3 wafw00f
 
@@ -80,37 +74,24 @@ jobs:
           # Go binaries
           cp -a $HOME/go/bin/* vendor/bin/ || true
 
-          # System binaries
-          for b in /usr/bin/sqlmap /usr/bin/ffuf /usr/bin/gobuster /usr/bin/trivy /usr/bin/tshark /usr/bin/nmap; do
+          # System/installed binaries
+          for b in /usr/bin/sqlmap /usr/bin/ffuf /usr/bin/gobuster /usr/bin/tshark /usr/bin/nmap; do
             if [ -x "$b" ]; then cp "$b" vendor/bin/; fi
           done
-
-          # WPScan shim (gem executable)
-          if command -v wpscan >/dev/null 2>&1; then
-            mkdir -p vendor/bin
-            ln -sf "$(command -v wpscan)" vendor/bin/wpscan
+          # Trivy (script installed)
+          if command -v trivy >/dev/null 2>&1; then
+            sudo cp "$(command -v trivy)" vendor/bin/trivy
           fi
 
-          # zsteg (gem executable)
-          if command -v zsteg >/dev/null 2>&1; then
-            ln -sf "$(command -v zsteg)" vendor/bin/zsteg
-          fi
+          # WPScan & zsteg (gems)
+          if command -v wpscan >/dev/null 2>&1; then ln -sf "$(command -v wpscan)" vendor/bin/wpscan; fi
+          if command -v zsteg  >/dev/null 2>&1; then ln -sf "$(command -v zsteg)"  vendor/bin/zsteg;  fi
 
-          # wafw00f (pip user)
-          if command -v wafw00f >/dev/null 2>&1; then
-            ln -sf "$(command -v wafw00f)" vendor/bin/wafw00f
-          else
-            if [ -x "$HOME/.local/bin/wafw00f" ]; then ln -sf "$HOME/.local/bin/wafw00f" vendor/bin/wafw00f; fi
-          fi
+          # wafw00f / volatility3 (pip user)
+          if command -v wafw00f >/dev/null 2>&1; then ln -sf "$(command -v wafw00f)" vendor/bin/wafw00f; elif [ -x "$HOME/.local/bin/wafw00f" ]; then ln -sf "$HOME/.local/bin/wafw00f" vendor/bin/wafw00f; fi
+          if command -v volatility3 >/dev/null 2>&1; then ln -sf "$(command -v volatility3)" vendor/bin/volatility3; elif [ -x "$HOME/.local/bin/volatility3" ]; then ln -sf "$HOME/.local/bin/volatility3" vendor/bin/volatility3; fi
 
-          # volatility3 (pip user)
-          if command -v volatility3 >/dev/null 2>&1; then
-            ln -sf "$(command -v volatility3)" vendor/bin/volatility3
-          else
-            if [ -x "$HOME/.local/bin/volatility3" ]; then ln -sf "$HOME/.local/bin/volatility3" vendor/bin/volatility3; fi
-          fi
-
-          # SecLists (vendor via git clone since no apt pkg)
+          # SecLists via git (canonical source)
           git clone --depth=1 https://github.com/danielmiessler/SecLists.git vendor/seclists
 
           # nuclei templates
